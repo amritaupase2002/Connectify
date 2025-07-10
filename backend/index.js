@@ -158,7 +158,7 @@ io.on('connection', (socket) => {
 app.get('/', (req, res) => {
   res.send('Hello, World!');
 })
-// Meeting link endpoint
+
 app.get('/api/join/:roomId', async (req, res) => {
   try {
     const room = await Room.findByPk(req.params.roomId, {
