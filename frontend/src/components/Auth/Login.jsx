@@ -10,7 +10,7 @@ export default function Login({ setUser }) {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const { data } = await axios.post('http://localhost:3001/api/auth/login', { username, password });
+      const { data } = await axios.post('https://connectify-delta-two.vercel.app/api/auth/login', { username, password });
       setUser({ username, token: data.token });
     } catch (err) {
       setError('Invalid credentials');

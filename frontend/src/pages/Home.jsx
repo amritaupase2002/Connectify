@@ -10,7 +10,7 @@ export default function Home({ user, setUser }) {
 
   useEffect(() => {
     const fetchRooms = async () => {
-      const { data } = await axios.get('https://connectify-fawn.vercel.app/api/rooms/list', {
+      const { data } = await axios.get('https://connectify-delta-two.vercel.app/api/rooms/list', {
         headers: { Authorization: `Bearer ${user.token}` },
       });
       setRooms(data);

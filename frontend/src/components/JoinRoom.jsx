@@ -16,7 +16,7 @@ export default function JoinRoom({ user, setRooms }) {
     
     try {
       const { data } = await axios.post(
-        'https://connectify-fawn.vercel.app/api/rooms/create',
+        'https://connectify-delta-two.vercel.app/api/rooms/create',
         { name: roomName, type: 'video' },
         { 
           headers: { 

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import { toast } from 'react-toastify';
 
-const socket = io('http://localhost:3001');
+const socket = io('https://connectify-delta-two.vercel.app');
 
 export default function ChatRoom({ user, room }) {
   const [messages, setMessages] = useState([]);

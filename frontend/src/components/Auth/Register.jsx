@@ -11,7 +11,7 @@ export default function Register() {
   const handleRegister = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('https://connectify-fawn.vercel.app/api/auth/register', { username, password });
+      await axios.post('https://connectify-delta-two.vercel.app/api/auth/register', { username, password });
       navigate('/login');
     } catch (err) {
       setError('Username already exists');
