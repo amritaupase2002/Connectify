@@ -3,43 +3,34 @@ import { createServer } from 'http';
 import cors from 'cors';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
-import sequelize from './config/db.js';
-import User from './models/User.js';
-import Room from './models/Room.js';
-import Message from './models/Message.js';
+import dotenv from 'dotenv';
+import db from './config/db.js'; 
 import authRoutes from './routes/auth.js';
 import roomRoutes from './routes/rooms.js';
-import dotenv from 'dotenv';
 
 dotenv.config();
 
 const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || 'your_fallback_secret';
 
-// Enhanced CORS configuration
 app.use(cors());
-
 app.use(express.json());
 
 const server = createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: "*"
-  },
-
+  cors: { origin: "*" },
   connectionStateRecovery: {
-    maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
+    maxDisconnectionDuration: 2 * 60 * 1000,
     skipMiddlewares: true
   }
 });
 
-// Authentication middleware for Socket.IO
+// 🔐 Socket Authentication
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) {
     return next(new Error('Authentication error: No token provided'));
   }
-
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     socket.user = decoded;
@@ -50,7 +41,7 @@ io.use((socket, next) => {
   }
 });
 
-// Routes
+// 📁 Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomRoutes);
 
@@ -60,72 +51,67 @@ const activeRooms = new Map();
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id} (User ID: ${socket.user?.id})`);
 
-  // Join room with authentication
   socket.on('join_room', async (roomId) => {
     try {
-      const room = await Room.findByPk(roomId);
-      if (!room) {
-        throw new Error('Room not found');
-      }
+      const [rooms] = await db.query('SELECT * FROM rooms WHERE id = ?', [roomId]);
+      const room = rooms[0];
+      if (!room) throw new Error('Room not found');
 
       socket.join(roomId);
-      
-      // Track participants
+
       if (!activeRooms.has(roomId)) {
         activeRooms.set(roomId, new Set());
       }
       activeRooms.get(roomId).add(socket.id);
 
-      // Load messages
-      const messages = await Message.findAll({
-        where: { roomId },
-        include: [{ model: User, attributes: ['id', 'username'] }],
-        order: [['timestamp', 'ASC']],
-        limit: 100 // Prevent loading too many messages
-      });
+      const [messages] = await db.query(
+        `SELECT m.id, m.content, m.timestamp, u.id AS userId, u.username
+         FROM messages m
+         JOIN users u ON m.userId = u.id
+         WHERE m.roomId = ?
+         ORDER BY m.timestamp ASC
+         LIMIT 100`,
+        [roomId]
+      );
 
       socket.emit('load_messages', messages);
       socket.to(roomId).emit('user_joined', socket.user.id);
-
     } catch (error) {
       console.error('Join room error:', error);
       socket.emit('room_error', error.message);
     }
   });
 
-  // Handle messages
   socket.on('send_message', async ({ roomId, content }) => {
     try {
       if (!content?.trim()) {
         throw new Error('Message cannot be empty');
       }
 
-      const message = await Message.create({
-        content,
-        roomId,
-        userId: socket.user.id
-      });
+      const [result] = await db.query(
+        'INSERT INTO messages (content, roomId, userId) VALUES (?, ?, ?)',
+        [content, roomId, socket.user.id]
+      );
+      const messageId = result.insertId;
 
-      const messageWithUser = await Message.findOne({
-        where: { id: message.id },
-        include: [{ model: User, attributes: ['id', 'username'] }],
-      });
+      const [rows] = await db.query(
+        `SELECT m.id, m.content, m.timestamp, u.id AS userId, u.username
+         FROM messages m
+         JOIN users u ON m.userId = u.id
+         WHERE m.id = ?`,
+        [messageId]
+      );
 
-      io.to(roomId).emit('receive_message', {
-        id: message.id,
-        content: message.content,
-        userId: messageWithUser.User.id,
-        username: messageWithUser.User.username,
-        timestamp: message.timestamp
-      });
+      const message = rows[0];
 
+      io.to(roomId).emit('receive_message', message);
     } catch (error) {
       console.error('Message send error:', error);
       socket.emit('message_error', error.message);
     }
   });
 
-  // WebRTC Signaling
+  // WebRTC signaling
   socket.on('offer', (targetSocketId, description) => {
     socket.to(targetSocketId).emit('offer', socket.id, description);
   });
@@ -138,16 +124,13 @@ io.on('connection', (socket) => {
     socket.to(targetSocketId).emit('candidate', socket.id, candidate);
   });
 
-  // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);
-    
-    // Clean up room participation
+
     activeRooms.forEach((participants, roomId) => {
       if (participants.has(socket.id)) {
         participants.delete(socket.id);
         socket.to(roomId).emit('user_left', socket.user.id);
-        
         if (participants.size === 0) {
           activeRooms.delete(roomId);
         }
@@ -155,16 +138,24 @@ io.on('connection', (socket) => {
     });
   });
 });
+
+// Test endpoint
 app.get('/', (req, res) => {
   res.send('Hello, World!');
-})
+});
 
+// Public room join info
 app.get('/api/join/:roomId', async (req, res) => {
   try {
-    const room = await Room.findByPk(req.params.roomId, {
-      include: [{ model: User, attributes: ['id', 'username'] }]
-    });
-    
+    const [rooms] = await db.query(
+      `SELECT r.*, u.id AS creatorId, u.username AS creatorUsername
+       FROM rooms r
+       LEFT JOIN users u ON r.createdBy = u.id
+       WHERE r.id = ?`,
+      [req.params.roomId]
+    );
+
+    const room = rooms[0];
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
@@ -174,15 +165,18 @@ app.get('/api/join/:roomId', async (req, res) => {
       name: room.name,
       type: room.type,
       createdAt: room.createdAt,
-      createdBy: room.User
+      createdBy: {
+        id: room.creatorId,
+        username: room.creatorUsername
+      }
     });
   } catch (error) {
-    console.error('Meeting link error:', error);
+    console.error('Join info error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Health check endpoint
+// Health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'OK',
@@ -192,22 +186,13 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Error handling middleware
+// Global error handler
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
+  console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Database synchronization and server start
-sequelize.sync({ alter: true }).then(() => {
-  server.listen(3001, () => {
-    console.log(`
-      Server running on port 3001
-      Database: ${sequelize.config.database}
-      CORS Allowed Origin: ${process.env.FRONTEND_URL || 'http://localhost:5173'}
-    `);
-  });
-}).catch(err => {
-  console.error('Database connection error:', err);
-  process.exit(1);
+// Start server
+server.listen(3001, () => {
+  console.log(`Server running on port 3001`);
 });
